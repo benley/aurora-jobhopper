@@ -1,0 +1,6 @@
+twitter.common.app>=0.3.3
+twitter.common.log>=0.3.3
+twitter.common.http>=0.3.3
+twitter.common.exceptions>=0.3.3
+twitter.common.zookeeper>=0.3.3
+CherryPy>=3.7.0

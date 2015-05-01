@@ -1,0 +1,10 @@
+*.pyc
+*~
+/.coverage
+/build/*
+/dist/*
+/.testrepository/*
+ChangeLog
+AUTHORS
+/*.egg-info/*
+/*.egg/*
