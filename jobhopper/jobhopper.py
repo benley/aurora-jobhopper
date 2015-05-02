@@ -130,11 +130,9 @@ def run():
                    help='Zookeeper service path root.',
                    default='/aurora/svc')
     app.add_option('--scheduler_url',
-                   help='Aurora scheduler URL',
-                   default='https://aurora.corp.folsomlabs.com/scheduler/')
+                   help='Aurora scheduler URL')
     app.add_option('--base_domain',
-                   help='Domain name of your site.',
-                   default='folsomlabs.com')
+                   help='Domain name of your site.')
     app.add_option('--subdomain',
                    help='Subdomain that roots Aurora job namespace.',
                    default='aurora')
