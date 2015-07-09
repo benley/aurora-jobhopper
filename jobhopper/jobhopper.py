@@ -18,11 +18,11 @@ from twitter.common.zookeeper.serverset import serverset
 
 JOB_RE = r"""
          (?xi) ^
-         (?:(?:(?:(?P<instance>    \d+          )\.)?
+         (?:(?:(?:(?:(?P<instance> \d+          )\.)?
                   (?P<job>         \w[\w.-]*    )\.)?
                (?:(?P<environment> [\w-]+       )\.))?
-                  (?P<role>        [\w-]+       )\.
-                  (?P<cluster>     [A-Z]{2}     )
+                  (?P<role>        [\w-]+       )\.)?
+                  (?P<cluster>     [\w-]+       )
          \.%(subdomain)s
          (?:\.%(domainname)s)?\.?$
          """
