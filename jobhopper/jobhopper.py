@@ -63,10 +63,12 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     def dns_lookup(self, qname, qtype):
         log.info('%s: %s', self.request.method, self.request.url)
 
-        a_response = lambda x: {'qtype': 'A',
-                                'qname': qname,
-                                'ttl': self.dns_ttl,
-                                'content': x.service_endpoint.host}
+        a_response = lambda x: {
+            'qtype': 'A',
+            'qname': qname,
+            'ttl': self.dns_ttl,
+            'content': x.service_endpoint.host
+            }
         soa_response = lambda: {
             'qtype': 'SOA',
             'qname': self.soa_zone,
