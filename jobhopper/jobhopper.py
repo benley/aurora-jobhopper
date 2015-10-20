@@ -195,7 +195,7 @@ def run():
                    default='0.0.0.0')
     app.add_option('--zk',
                    help='Zookeeper ensemble (comma-delimited)',
-                   default='zookeeper:2181')
+                   default='localhost:2181')
     app.add_option('--zk_basepath',
                    help='Zookeeper service path root.',
                    default='/aurora/svc')
