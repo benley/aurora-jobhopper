@@ -29,6 +29,17 @@ JOB_RE = r"""
 """Regex used to parse http request hostnames."""
 
 
+def dnsresponse(data):
+    """Construct a response for the PowerDNS remote backend.
+
+    Remote api docs:
+        https://doc.powerdns.com/md/authoritative/backend-remote/
+    """
+    resp = {'result': data}
+    log.info('DNS response: %s', resp)
+    return resp
+
+
 class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     """Aurora job hostname redirect service."""
 
@@ -42,20 +53,45 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         log.debug("Job hostname regex: %s", job_re)
         self.job_re = re.compile(job_re)
         self.dns_ttl = dns_ttl
+        self.soa_zone = '.'.join([subdomain, base_domain])
 
         DiagnosticsEndpoints.__init__(self)
         http.HttpServer.__init__(self)
 
     @http.route('/dnsapi/lookup/<qname>/<qtype>', method='GET')
     def dns_lookup(self, qname, qtype):
-        instances = self.resolve_hostname(qname)
+        log.info('%s: %s', self.request.method, self.request.url)
 
-        mkresponse = lambda x: {'qtype': qtype,
+        a_response = lambda x: {'qtype': 'A',
                                 'qname': qname,
                                 'ttl': self.dns_ttl,
                                 'content': x.service_endpoint.host}
+        soa_response = lambda: {
+            'qtype': 'SOA',
+            'qname': self.soa_zone,
+            'ttl': self.dns_ttl,
+            'content': 'ns1.%(zone)s root.%(zone)s 1 3600 600 8400 1' % {
+                'zone': self.soa_zone,
+                }
+            }
 
-        return {'result': [mkresponse(x) for x in instances]}
+        if qtype in ['A', 'ANY']:
+            instances = self.resolve_hostname(qname)
+            return dnsresponse([a_response(x) for x in instances] or False)
+
+        elif qtype == 'SOA' and qname.lower().endswith(self.soa_zone):
+            return dnsresponse([soa_response()])
+
+        else:
+            return dnsresponse(False)
+
+    @http.route('/dnsapi/getDomainMetadata/<qname>/<qkind>', method='GET')
+    def dns_getdomainmetadata(self, qname, qkind):
+        if qkind == 'SOA-EDIT':
+            # http://jpmens.net/2013/01/18/understanding-powerdns-soa-edit/
+            return dnsresponse(['EPOCH'])
+        else:
+            return dnsresponse(False)
 
     def parse_hostname(self, hostname):
         jmatch = self.job_re.match(hostname)
@@ -68,7 +104,7 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     def handle_root(self):
         """Handle all http requests."""
         req_hostname = self.request.urlparts.hostname
-        log.info('Request for: %s', req_hostname)
+        log.info('%s: %s', self.request.method, self.request.url)
         try:
             (instance, job, env, role, cluster) = self.parse_hostname(
                 req_hostname)
@@ -87,7 +123,10 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
 
     def resolve_hostname(self, hostname):
         """Resolve a hostname to a list of serverset instances."""
-        (instance, job, env, role, cluster) = self.parse_hostname(hostname)
+        try:
+            (instance, job, env, role, cluster) = self.parse_hostname(hostname)
+        except TypeError:
+            return []
         zkpath = os.path.join(self.zk_basepath, role, env, job)
         sset = serverset.ServerSet(self.zkclient, zkpath)
         if instance is None:
@@ -165,3 +204,7 @@ def run():
                    default=60)
 
     app.main()
+
+
+if __name__ == '__main__':
+    run()
