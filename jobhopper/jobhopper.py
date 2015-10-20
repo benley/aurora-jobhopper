@@ -5,6 +5,7 @@
 import os
 import random
 import re
+import time
 import urlparse
 
 from twitter.common import app
@@ -163,6 +164,11 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
             pickandgo(random.choice(instances))
 
 
+def wait_forever():
+    while True:
+        time.sleep(60)
+
+
 def run():
     def main(args, opts):
         """Main"""
@@ -179,8 +185,7 @@ def run():
         thread.daemon = True
         thread.start()
 
-        # Wait forever, basically.
-        thread.join()
+        wait_forever()
 
     app.add_option('--port', help='http port', default=8080)
     app.add_option('--listen',
