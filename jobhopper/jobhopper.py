@@ -32,7 +32,8 @@ JOB_RE = r"""
 class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     """Aurora job hostname redirect service."""
 
-    def __init__(self, zk, zk_basepath, scheduler_url, subdomain, base_domain):
+    def __init__(self, zk, zk_basepath, scheduler_url, subdomain, base_domain,
+                 dns_ttl=60):
         self.zkclient = zk
         self.zk_basepath = zk_basepath
         self.scheduler_url = scheduler_url
@@ -40,24 +41,41 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
                            'domainname': base_domain}
         log.debug("Job hostname regex: %s", job_re)
         self.job_re = re.compile(job_re)
+        self.dns_ttl = dns_ttl
 
         DiagnosticsEndpoints.__init__(self)
         http.HttpServer.__init__(self)
+
+    @http.route('/dnsapi/lookup/<qname>/<qtype>', method='GET')
+    def dns_lookup(self, qname, qtype):
+        instances = self.resolve_hostname(qname)
+
+        mkresponse = lambda x: {'qtype': qtype,
+                                'qname': qname,
+                                'ttl': self.dns_ttl,
+                                'content': x.service_endpoint.host}
+
+        return {'result': [mkresponse(x) for x in instances]}
+
+    def parse_hostname(self, hostname):
+        jmatch = self.job_re.match(hostname)
+        if not jmatch:
+            return None
+        # (instance, job, env, role, cluster)
+        return jmatch.groups()
 
     @http.route('/<:re:.*>', method='ANY')
     def handle_root(self):
         """Handle all http requests."""
         req_hostname = self.request.urlparts.hostname
         log.info('Request for: %s', req_hostname)
-        jmatch = self.job_re.match(req_hostname)
-        if not jmatch:
-            self.abort(404, r"¯\(°_o)/¯")
         try:
-            (instance, job, env, role, cluster) = jmatch.groups()
+            (instance, job, env, role, cluster) = self.parse_hostname(
+                req_hostname)
             if None in (env, job):
                 self.scheduler_redir(role, env)
-            self.job_redir(role, env, job, instance)
-        except TypeError:
+            self.job_redir(req_hostname)
+        except (TypeError, ValueError):
             self.abort(404, r"¯\(°_o)/¯")
 
     def scheduler_redir(self, role, env=None):
@@ -67,17 +85,20 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         log.info('Scheduler redirect: %s', url)
         self.redirect(url)
 
-    def job_redir(self, role, env, job, instance=None):
-        """Redirect to a running task instance."""
+    def resolve_hostname(self, hostname):
+        """Resolve a hostname to a list of serverset instances."""
+        (instance, job, env, role, cluster) = self.parse_hostname(hostname)
         zkpath = os.path.join(self.zk_basepath, role, env, job)
-        # TODO: persist serverset connections (maybe for 30 seconds?) with
-        # on_join/on_leave callbacks to keep a local cache of sorts and reduce
-        # zookeeper load.
         sset = serverset.ServerSet(self.zkclient, zkpath)
+        if instance is None:
+            return list(sset)
+        else:
+            for ss_instance in sset:
+                if ss_instance.shard == int(instance):
+                    return [ss_instance]
 
-        if len(list(sset)) == 0:
-            self.abort(404, "Job not found.")
-
+    def job_redir(self, hostname):
+        """Redirect to a running task instance."""
         def pickandgo(ins):
             """Pick an endpoint, serve a redirect.
 
@@ -90,15 +111,17 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
             log.info('Job redirect: %s', url)
             self.redirect(url)
 
-        if instance is None:
-            ss_instance = random.choice(list(sset))
-            pickandgo(ss_instance)
+        # TODO: persist serverset connections (maybe for 30 seconds?) with
+        # on_join/on_leave callbacks to keep a local cache of sorts and reduce
+        # zookeeper load.
+        instances = self.resolve_hostname(hostname)
 
-        for ss_instance in sset:
-            if ss_instance.shard == int(instance):
-                pickandgo(ss_instance)
-
-        self.abort(404, "Instance not found.")
+        if not instances:
+            self.abort(404, "Job not found.")
+        elif len(instances) == 1:
+            pickandgo(instances[0])
+        else:
+            pickandgo(random.choice(instances))
 
 
 def run():
@@ -108,7 +131,8 @@ def run():
         zkconn.start()
 
         server = RedirServer(zkconn, opts.zk_basepath, opts.scheduler_url,
-                             opts.subdomain, opts.base_domain)
+                             opts.subdomain, opts.base_domain,
+                             dns_ttl=opts.dns_ttl)
         thread = ExceptionalThread(
             target=lambda: server.run(opts.listen,
                                       opts.port,
@@ -136,5 +160,8 @@ def run():
     app.add_option('--subdomain',
                    help='Subdomain that roots Aurora job namespace.',
                    default='aurora')
+    app.add_option('--dns_ttl',
+                   help='TTL to use for dnsapi responses',
+                   default=60)
 
     app.main()
