@@ -30,22 +30,10 @@ JOB_RE = r"""
 """Regex used to parse http request hostnames."""
 
 
-def dnsresponse(data):
-    """Construct a response for the PowerDNS remote backend.
-
-    Remote api docs:
-        https://doc.powerdns.com/md/authoritative/backend-remote/
-    """
-    resp = {'result': data}
-    log.info('DNS response: %s', resp)
-    return resp
-
-
 class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     """Aurora job hostname redirect service."""
 
-    def __init__(self, zk, zk_basepath, scheduler_url, subdomain, base_domain,
-                 dns_ttl=60):
+    def __init__(self, zk, zk_basepath, scheduler_url, subdomain, base_domain):
         self.zkclient = zk
         self.zk_basepath = zk_basepath
         if scheduler_url.endswith('/'):
@@ -56,48 +44,9 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
                            'domainname': base_domain}
         log.debug("Job hostname regex: %s", job_re)
         self.job_re = re.compile(job_re)
-        self.dns_ttl = dns_ttl
-        self.soa_zone = '.'.join([subdomain, base_domain])
 
         DiagnosticsEndpoints.__init__(self)
         http.HttpServer.__init__(self)
-
-    @http.route('/dnsapi/lookup/<qname>/<qtype>', method='GET')
-    def dns_lookup(self, qname, qtype):
-        log.info('%s: %s', self.request.method, self.request.url)
-
-        a_response = lambda x: {
-            'qtype': 'A',
-            'qname': qname,
-            'ttl': self.dns_ttl,
-            'content': x.service_endpoint.host
-            }
-        soa_response = lambda: {
-            'qtype': 'SOA',
-            'qname': self.soa_zone,
-            'ttl': self.dns_ttl,
-            'content': 'ns1.%(zone)s root.%(zone)s 1 3600 600 8400 1' % {
-                'zone': self.soa_zone,
-                }
-            }
-
-        if qtype in ['A', 'ANY']:
-            instances = self.resolve_hostname(qname)
-            return dnsresponse([a_response(x) for x in instances] or False)
-
-        elif qtype == 'SOA' and qname.lower().endswith(self.soa_zone):
-            return dnsresponse([soa_response()])
-
-        else:
-            return dnsresponse(False)
-
-    @http.route('/dnsapi/getDomainMetadata/<qname>/<qkind>', method='GET')
-    def dns_getdomainmetadata(self, qname, qkind):
-        if qkind == 'SOA-EDIT':
-            # http://jpmens.net/2013/01/18/understanding-powerdns-soa-edit/
-            return dnsresponse(['EPOCH'])
-        else:
-            return dnsresponse(False)
 
     def parse_hostname(self, hostname):
         jmatch = self.job_re.match(hostname)
@@ -179,8 +128,7 @@ def run():
         zkconn.start()
 
         server = RedirServer(zkconn, opts.zk_basepath, opts.scheduler_url,
-                             opts.subdomain, opts.base_domain,
-                             dns_ttl=opts.dns_ttl)
+                             opts.subdomain, opts.base_domain)
         thread = ExceptionalThread(
             target=lambda: server.run(opts.listen,
                                       opts.port,
@@ -209,9 +157,6 @@ def run():
     app.add_option('--subdomain',
                    help='Subdomain that roots Aurora job namespace.',
                    default='aurora')
-    app.add_option('--dns_ttl',
-                   help='TTL to use for dnsapi responses',
-                   default=60)
 
     app.main()
 
