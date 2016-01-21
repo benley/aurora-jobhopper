@@ -48,7 +48,10 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
                  dns_ttl=60):
         self.zkclient = zk
         self.zk_basepath = zk_basepath
-        self.scheduler_url = scheduler_url
+        if scheduler_url.endswith('/'):
+            self.scheduler_url = scheduler_url
+        else:
+            self.scheduler_url = scheduler_url + '/'
         job_re = JOB_RE % {'subdomain': subdomain,
                            'domainname': base_domain}
         log.debug("Job hostname regex: %s", job_re)
@@ -200,9 +203,11 @@ def run():
                    help='Zookeeper service path root.',
                    default='/aurora/svc')
     app.add_option('--scheduler_url',
-                   help='Aurora scheduler URL')
+                   help='Aurora scheduler URL',
+                   default='http://localhost:8081')
     app.add_option('--base_domain',
-                   help='Domain name of your site.')
+                   help='Domain name of your site.',
+                   default='example.com')
     app.add_option('--subdomain',
                    help='Subdomain that roots Aurora job namespace.',
                    default='aurora')
