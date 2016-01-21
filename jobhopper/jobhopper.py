@@ -163,8 +163,6 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
 
         if not instances:
             self.abort(404, "Job not found.")
-        elif len(instances) == 1:
-            pickandgo(instances[0])
         else:
             pickandgo(random.choice(instances))
 
