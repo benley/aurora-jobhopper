@@ -177,7 +177,7 @@ def run():
                    default='0.0.0.0')
     app.add_option('--zk_basepath',
                    help='Zookeeper service path root.',
-                   default='/aurora/svc')
+                   default='/aurora')
     app.add_option('--base_domain',
                    help='Domain name of your site.',
                    default='example.com')
