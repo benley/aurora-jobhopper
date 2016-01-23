@@ -2,12 +2,15 @@
 # encoding: utf-8
 """Redirect server thingie"""
 
+import collections
 import os
 import random
 import re
 import time
 import urlparse
 
+from apache.aurora.client.api import AuroraClientAPI
+from apache.aurora.common import clusters
 from twitter.common import app
 from twitter.common import log
 from twitter.common import http
@@ -30,20 +33,21 @@ JOB_RE = r"""
 """Regex used to parse http request hostnames."""
 
 
+AuroraTask = collections.namedtuple(
+    'AuroraJob', ['instance', 'job', 'environment', 'role', 'cluster'])
+
+CLUSTERS = clusters.CLUSTERS
+
+
 class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     """Aurora job hostname redirect service."""
 
-    def __init__(self, zk, zk_basepath, scheduler_url, subdomain, base_domain):
-        self.zkclient = zk
+    def __init__(self, zk_basepath, subdomain, base_domain):
+        self.zk_connections = {}
         self.zk_basepath = zk_basepath
-        if scheduler_url.endswith('/'):
-            self.scheduler_url = scheduler_url
-        else:
-            self.scheduler_url = scheduler_url + '/'
-        job_re = JOB_RE % {'subdomain': subdomain,
-                           'domainname': base_domain}
-        log.debug("Job hostname regex: %s", job_re)
-        self.job_re = re.compile(job_re)
+
+        self.job_re = re.compile(JOB_RE % {'subdomain': subdomain,
+                                           'domainname': base_domain})
 
         DiagnosticsEndpoints.__init__(self)
         http.HttpServer.__init__(self)
@@ -53,7 +57,7 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         if not jmatch:
             return None
         # (instance, job, env, role, cluster)
-        return jmatch.groups()
+        return AuroraTask(**jmatch.groupdict())
 
     @http.route('/<:re:.*>', method='ANY')
     def handle_root(self):
@@ -61,37 +65,68 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         req_hostname = self.request.urlparts.hostname
         log.info('%s: %s', self.request.method, self.request.url)
         try:
-            (instance, job, env, role, cluster) = self.parse_hostname(
-                req_hostname)
-            if None in (env, job):
-                self.scheduler_redir(role, env)
-            self.job_redir(req_hostname)
+            task = self.parse_hostname(req_hostname)
+            if None in (task.role, task.environment, task.job):
+                self.scheduler_redir(task)
+            self.task_redir(task)
         except (TypeError, ValueError):
             self.abort(404, r"¯\(°_o)/¯")
 
-    def scheduler_redir(self, role, env=None):
+    def scheduler_redir(self, task):
         """Redirect to the scheduler."""
-        url = urlparse.urljoin(self.scheduler_url,
-                               '%s/%s' % (role, env) if env else role)
+        scheduler_url = self.get_scheduler_url(task.cluster)
+
+        if task.role is None:
+            job_url = '/scheduler'
+        elif task.environment is None:
+            job_url = '/scheduler/%s' % task.role
+        else:
+            job_url = '/scheduler/%s/%s' % (task.role, task.environment)
+
+        url = urlparse.urljoin(scheduler_url, job_url)
         log.info('Scheduler redirect: %s', url)
         self.redirect(url)
 
-    def resolve_hostname(self, hostname):
-        """Resolve a hostname to a list of serverset instances."""
-        try:
-            (instance, job, env, role, cluster) = self.parse_hostname(hostname)
-        except TypeError:
-            return []
-        zkpath = os.path.join(self.zk_basepath, role, env, job)
-        sset = serverset.ServerSet(self.zkclient, zkpath)
-        if instance is None:
+    def get_scheduler_url(self, clustername):
+        cluster = CLUSTERS.get(clustername)
+        api = AuroraClientAPI(cluster, user_agent='jobhopper')
+
+        return api.scheduler_proxy.scheduler_client().url
+
+    def get_zk(self, clustername):
+        """Return a TwitterKazooClient connection for the given cluster."""
+
+        if clustername not in self.zk_connections:
+            cluster = CLUSTERS.get(clustername)
+            if 'zk_port' in cluster:
+                zk_port = cluster.zk_port
+            else:
+                zk_port = 2181
+            self.zk_connections[clustername] = kazoo_client.TwitterKazooClient(
+                "%s:%s" % (cluster.zk, zk_port))
+
+        zkclient = self.zk_connections.get(clustername)
+
+        if not zkclient.connected:
+            zkclient.start()
+
+        return zkclient
+
+    def resolve_task(self, task):
+        """Resolve a job/task to a list of serverset instances."""
+        zkclient = self.get_zk(task.cluster)
+        zkpath = os.path.join(self.zk_basepath, task.role, task.environment,
+                              task.job)
+        sset = serverset.ServerSet(zkclient, zkpath)
+
+        if task.instance is None:
             return list(sset)
         else:
             for ss_instance in sset:
-                if ss_instance.shard == int(instance):
+                if ss_instance.shard == int(task.instance):
                     return [ss_instance]
 
-    def job_redir(self, hostname):
+    def task_redir(self, task):
         """Redirect to a running task instance."""
         def pickandgo(ins):
             """Pick an endpoint, serve a redirect.
@@ -108,7 +143,7 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         # TODO: persist serverset connections (maybe for 30 seconds?) with
         # on_join/on_leave callbacks to keep a local cache of sorts and reduce
         # zookeeper load.
-        instances = self.resolve_hostname(hostname)
+        instances = self.resolve_task(task)
 
         if not instances:
             self.abort(404, "Job not found.")
@@ -124,11 +159,9 @@ def wait_forever():
 def run():
     def main(args, opts):
         """Main"""
-        zkconn = kazoo_client.TwitterKazooClient(opts.zk)
-        zkconn.start()
-
-        server = RedirServer(zkconn, opts.zk_basepath, opts.scheduler_url,
-                             opts.subdomain, opts.base_domain)
+        server = RedirServer(opts.zk_basepath,
+                             opts.subdomain,
+                             opts.base_domain)
         thread = ExceptionalThread(
             target=lambda: server.run(opts.listen,
                                       opts.port,
@@ -142,15 +175,9 @@ def run():
     app.add_option('--listen',
                    help='IP address to listen for http connections.',
                    default='0.0.0.0')
-    app.add_option('--zk',
-                   help='Zookeeper ensemble (comma-delimited)',
-                   default='localhost:2181')
     app.add_option('--zk_basepath',
                    help='Zookeeper service path root.',
                    default='/aurora/svc')
-    app.add_option('--scheduler_url',
-                   help='Aurora scheduler URL',
-                   default='http://localhost:8081')
     app.add_option('--base_domain',
                    help='Domain name of your site.',
                    default='example.com')
