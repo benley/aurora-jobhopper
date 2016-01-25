@@ -9,8 +9,6 @@ import re
 import time
 import urlparse
 
-from apache.aurora.client.api import AuroraClientAPI
-from apache.aurora.common import clusters
 from twitter.common import app
 from twitter.common import log
 from twitter.common import http
@@ -18,6 +16,8 @@ from twitter.common.exceptions import ExceptionalThread
 from twitter.common.http.diagnostics import DiagnosticsEndpoints
 from twitter.common.zookeeper import kazoo_client
 from twitter.common.zookeeper.serverset import serverset
+
+from jobhopper import clusters
 
 
 JOB_RE = r"""
@@ -43,6 +43,7 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     """Aurora job hostname redirect service."""
 
     def __init__(self, zk_basepath, subdomain, base_domain):
+        # Mapping of zookeeper URIs to matching TwitterKazooClient
         self.zk_connections = {}
         self.zk_basepath = zk_basepath
 
@@ -66,6 +67,7 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         log.info('%s: %s', self.request.method, self.request.url)
         try:
             task = self.parse_hostname(req_hostname)
+            print task
             if None in (task.role, task.environment, task.job):
                 self.scheduler_redir(task)
             self.task_redir(task)
@@ -88,24 +90,33 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         self.redirect(url)
 
     def get_scheduler_url(self, clustername):
+        """Imitate AuroraClientAPI.scheduler_proxy.scheduler_client.url"""
         cluster = CLUSTERS.get(clustername)
-        api = AuroraClientAPI(cluster, user_agent='jobhopper')
 
-        return api.scheduler_proxy.scheduler_client().url
+        if 'proxy_url' in cluster:
+            return cluster['proxy_url']
+        if 'zk' in cluster and 'scheduler_zk_path' in cluster:
+            zkclient = self.get_zk(clustername)
+            sset = serverset.ServerSet(zkclient, cluster['scheduler_zk_path'])
+            instance = list(sset)[0]
+            endpoint = instance.additional_endpoints.get(
+                'http', instance.service_endpoint)
+            return 'http://%s' % endpoint
+        if 'scheduler_uri' in cluster:
+            return cluster['scheduler_uri']
+        raise RuntimeError('Failed to find scheduler for %s' % clustername)
 
     def get_zk(self, clustername):
         """Return a TwitterKazooClient connection for the given cluster."""
+        cluster = CLUSTERS.get(clustername)
+        zk_url = "%s:%s" % (cluster.get('zk'),
+                            cluster.get('zk_port', 2181))
 
         if clustername not in self.zk_connections:
-            cluster = CLUSTERS.get(clustername)
-            if 'zk_port' in cluster:
-                zk_port = cluster.zk_port
-            else:
-                zk_port = 2181
-            self.zk_connections[clustername] = kazoo_client.TwitterKazooClient(
-                "%s:%s" % (cluster.zk, zk_port))
+            self.zk_connections[zk_url] = kazoo_client.TwitterKazooClient(
+                zk_url)
 
-        zkclient = self.zk_connections.get(clustername)
+        zkclient = self.zk_connections.get(zk_url)
 
         if not zkclient.connected:
             zkclient.start()
