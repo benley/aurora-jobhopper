@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+
+export PBR_VERSION=$(shell dpkg-parsechangelog --show-field version)
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	mkdir -p build
+	pex $(CURDIR) -r requirements.txt -m jobhopper -v -o build/jobhopper --python=python
+
+override_dh_auto_install:

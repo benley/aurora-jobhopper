@@ -1,0 +1,21 @@
+Source: aurora-jobhopper
+Section: net
+Priority: extra
+Maintainer: Benjamin Staffin <bstaffin@fitbit.com>
+Build-Depends: debhelper (>= 9.0.0), python-all-dev,
+ pex,
+ python-wheel,
+ python-setuptools,
+ python-pbr,
+ python3-requests,
+Standards-Version: 3.9.6
+Homepage: https://github.com/benley/aurora-jobhopper
+
+Package: aurora-jobhopper
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}, python2.7
+Built-Using: ${misc:Built-Using}
+Description: Handy http redirect service for Apache Aurora jobs
+ Jobhopper is a simple http redirector daemon designed to make it easy and
+ convenient for developers and administrators to navigate directly to any
+ running Aurora job on your Mesos cluster from your browser's address bar.

@@ -1,0 +1,13 @@
+aurora-jobhopper (0.2) unstable; urgency=medium
+
+  Relevant changes since 0.1:
+  * Fix shutdown handling: ^C now actually exits
+  * Default to localhost for zookeeper
+  * Set probably-useless defaults for --scheduler_url and --base_domain
+  * Don't special-case single instance jobs
+  * Extend multi-cluster support
+  * Change zk_basepath default to match aurora's default
+  * Refactor to remove use of private aurora apis
+  * Rename entrypoint to __main__.py
+
+ -- Benjamin Staffin <benley@gmail.com>  Tue, 26 Jan 2016 00:12:27 +0000
