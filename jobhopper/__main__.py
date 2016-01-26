@@ -67,7 +67,6 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
         log.info('%s: %s', self.request.method, self.request.url)
         try:
             task = self.parse_hostname(req_hostname)
-            print task
             if None in (task.role, task.environment, task.job):
                 self.scheduler_redir(task)
             self.task_redir(task)
