@@ -181,6 +181,8 @@ def run():
 
         wait_forever()
 
+    log.LogOptions.set_stderr_log_level('google:INFO')
+
     app.add_option('--port', help='http port', default=8080)
     app.add_option('--listen',
                    help='IP address to listen for http connections.',
