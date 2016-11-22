@@ -108,7 +108,7 @@ class RedirServer(http.HttpServer, DiagnosticsEndpoints):
     def get_zk(self, clustername):
         """Return a TwitterKazooClient connection for the given cluster."""
         cluster = CLUSTERS.get(clustername)
-        zk_url = "%s:%s" % (cluster.get('zk'),
+        zk_url = "%s:%s" % (cluster.get('zk_discovery' if 'zk_discovery' in cluster else 'zk'),
                             cluster.get('zk_port', 2181))
 
         if clustername not in self.zk_connections:
