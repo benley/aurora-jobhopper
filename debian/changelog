@@ -1,3 +1,10 @@
+aurora-jobhopper (0.3) unstable; urgency=medium
+
+  Relevant changes since 0.2:
+  * Use zk_discovery as zk cluster if present in clusters.json
+
+ -- Jarod Watkins <jarod@42lines.net>  Tue, 22 Nov 2016 02:23:00 +0000
+
 aurora-jobhopper (0.2) unstable; urgency=medium
 
   Relevant changes since 0.1:
