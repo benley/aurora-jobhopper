@@ -51,8 +51,9 @@ http://east1.aurora/ will take you to the top-level scheduler status page for
 the east1 aurora cluster.
 
 This app is not intended to be used for serving production traffic!
-For that, you should use something like Synapse_ or aurproxy_.
-
+For that, you should consider tools like aurproxy_, synapse_, envoy_, and linkerd_.
 
 .. _Synapse: https://github.com/benley/synapse
 .. _aurproxy: https://github.com/tellapart/aurproxy
+.. _envoy: https://github.com/lyft/envoy
+.. _linkerd: https://github.com/linkerd/linkerd
